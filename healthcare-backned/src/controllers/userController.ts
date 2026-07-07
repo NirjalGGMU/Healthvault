@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import User, { PASSWORD_HISTORY_SIZE } from '../models/User';
+import Appointment from '../models/Appointment';
+import { decryptNotes } from './appointmentController';
 import logger from '../config/logger';
 
 /**
@@ -208,6 +210,51 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
     const message = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`Change password error: ${message}`);
     res.status(500).json({ message: 'Failed to change password' });
+  }
+};
+
+/**
+ * GET /api/users/export (auth required)
+ * Self-service data export: returns the requesting user's own profile and
+ * appointments as JSON, for the user to download. Scoped strictly to
+ * req.user.id — a user can only ever export their own data, never anyone else's.
+ */
+export const exportUserData = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    const user = await User.findById(req.user.id).select('-password -mfaSecret -passwordHistory');
+    if (!user) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    const filter = req.user.role === 'doctor' ? { doctorId: req.user.id } : { patientId: req.user.id };
+    const appointments = await Appointment.find(filter)
+      .populate('doctorId', 'name email')
+      .populate('patientId', 'name email')
+      .sort({ date: 1, time: 1 });
+
+    const safeAppointments = appointments.map((appointment) => {
+      const obj = appointment.toObject() as unknown as Record<string, unknown>;
+      obj.notes = typeof obj.notes === 'string' && obj.notes.length > 0 ? decryptNotes(obj.notes) : null;
+      return obj;
+    });
+
+    logger.info(`USER: ${user.email} exported their own data (${safeAppointments.length} appointments)`);
+
+    res.status(200).json({
+      exportedAt: new Date().toISOString(),
+      user,
+      appointments: safeAppointments,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    logger.error(`Export user data error: ${message}`);
+    res.status(500).json({ message: 'Failed to export data' });
   }
 };
 

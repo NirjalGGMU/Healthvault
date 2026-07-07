@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { UserRecord } from '../types';
+import { exportToJSON } from '../utils/export';
 
 const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -36,6 +37,7 @@ const Profile = () => {
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -137,6 +139,19 @@ const Profile = () => {
       toast.error(getErrorMessage(error));
     } finally {
       setSavingPassword(false);
+    }
+  };
+
+  const exportData = async () => {
+    setExporting(true);
+    try {
+      const { data } = await api.get('/users/export');
+      exportToJSON(`healthvault-data-export-${Date.now()}.json`, data);
+      toast.success('Your data export has started downloading');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -296,6 +311,21 @@ const Profile = () => {
               {t('profile.manageMfa')}
             </Link>
           </div>
+        </div>
+      </div>
+
+      {/* Data export */}
+      <div className="card">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="font-semibold text-gray-900 dark:text-white">Your Data</h2>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Download a copy of your profile and appointment history as a JSON file.
+            </p>
+          </div>
+          <button type="button" onClick={exportData} disabled={exporting} className="btn-accent !py-2">
+            {exporting ? 'Exporting...' : 'Download my data'}
+          </button>
         </div>
       </div>
     </div>
