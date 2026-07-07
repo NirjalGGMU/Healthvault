@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ./healthcare-backned
+      dockerfile: Dockerfile
+    env_file:
+      - ./healthcare-backned/.env
+    ports:
+      - "5001:5001"
+    volumes:
+      - backend-uploads:/app/uploads
+      - backend-logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./healthvault_frontend
+      dockerfile: Dockerfile
+      args:
+        # Browser-facing URL — the frontend is client-side JS, so it must reach the
+        # backend at the same host-mapped port, not the internal Docker network name.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5001}
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-uploads:
+  backend-logs:
