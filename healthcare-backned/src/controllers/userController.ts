@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import User, { PASSWORD_HISTORY_SIZE } from '../models/User';
 import Appointment from '../models/Appointment';
-import { decryptNotes } from './appointmentController';
+import { decryptNotes } from '../utils/encryption';
 import logger from '../config/logger';
 
 /**
@@ -77,7 +77,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    logger.info(`USER: profile updated for ${user.email} (fields: ${Object.keys(updates).join(', ')})`);
+    logger.info(`USER: profile updated for ${user._id} (fields: ${Object.keys(updates).join(', ')})`);
 
     res.status(200).json({ message: 'Profile updated', user });
   } catch (error) {
@@ -116,7 +116,7 @@ export const uploadAvatar = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    logger.info(`USER: avatar updated for ${user.email}`);
+    logger.info(`USER: avatar updated for ${user._id}`);
 
     res.status(200).json({ message: 'Avatar updated', user });
   } catch (error) {
@@ -203,7 +203,7 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
     user.password = newPassword; // re-hashed by the pre-save hook
     await user.save();
 
-    logger.info(`USER: password changed for ${user.email}`);
+    logger.info(`USER: password changed for ${user._id}`);
 
     res.status(200).json({ message: 'Password changed successfully' });
   } catch (error) {
@@ -244,7 +244,7 @@ export const exportUserData = async (req: Request, res: Response): Promise<void>
       return obj;
     });
 
-    logger.info(`USER: ${user.email} exported their own data (${safeAppointments.length} appointments)`);
+    logger.info(`USER: ${user._id} exported their own data (${safeAppointments.length} appointments)`);
 
     res.status(200).json({
       exportedAt: new Date().toISOString(),

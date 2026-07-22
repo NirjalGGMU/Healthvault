@@ -2,12 +2,6 @@ import { NextFunction, Request, Response } from 'express';
 import { RecaptchaV2 } from 'express-recaptcha';
 import logger from '../config/logger';
 
-interface RecaptchaResult {
-  error: string | null;
-}
-
-type RecaptchaRequest = Request & { recaptcha?: RecaptchaResult };
-
 // Lazily initialised so process.env is read AFTER dotenv.config() has run
 // (ES module imports are hoisted above the dotenv call in server.ts).
 let recaptchaInstance: RecaptchaV2 | null = null;
@@ -32,27 +26,47 @@ const getRecaptcha = (): RecaptchaV2 | null => {
   return recaptchaInstance;
 };
 
+export interface CaptchaCheckResult {
+  ok: boolean;
+  message?: string;
+}
+
+/**
+ * Verifies the `g-recaptcha-response` field against Google directly (no res/next
+ * needed), so callers that must decide conditionally — e.g. login() deciding
+ * per-account whether CAPTCHA applies — can await this inline instead of
+ * being forced through unconditional route middleware.
+ */
+export const checkRecaptcha = (req: Request): Promise<CaptchaCheckResult> => {
+  const recaptcha = getRecaptcha();
+
+  if (!recaptcha) {
+    // Not configured (development) — warn once at init, do not block
+    return Promise.resolve({ ok: true });
+  }
+
+  return new Promise((resolve) => {
+    recaptcha.verify(req, (error) => {
+      if (error) {
+        logger.warn(`CAPTCHA verification failed from IP ${req.ip}: ${error}`);
+        resolve({ ok: false, message: 'CAPTCHA verification failed. Please try again.' });
+        return;
+      }
+      resolve({ ok: true });
+    });
+  });
+};
+
 /**
  * Google reCAPTCHA v2 verification middleware.
  * Expects the client to send `g-recaptcha-response` in the request body
  * (the standard field produced by the reCAPTCHA widget).
  */
-export const verifyCaptcha = (req: Request, res: Response, next: NextFunction): void => {
-  const recaptcha = getRecaptcha();
-
-  if (!recaptcha) {
-    // Not configured (development) — warn once at init, do not block
-    next();
+export const verifyCaptcha = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const result = await checkRecaptcha(req);
+  if (!result.ok) {
+    res.status(400).json({ message: result.message });
     return;
   }
-
-  recaptcha.middleware.verify(req, res, () => {
-    const result = (req as RecaptchaRequest).recaptcha;
-    if (result?.error) {
-      logger.warn(`CAPTCHA verification failed from IP ${req.ip}: ${result.error}`);
-      res.status(400).json({ message: 'CAPTCHA verification failed. Please try again.' });
-      return;
-    }
-    next();
-  });
+  next();
 };

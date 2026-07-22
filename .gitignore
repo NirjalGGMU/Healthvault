@@ -5,3 +5,5 @@ build/
 .DS_Store
 .env
 .env.*
+.claude/
+commit_script.sh

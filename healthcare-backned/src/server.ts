@@ -16,6 +16,8 @@ import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/userRoutes';
 import appointmentRoutes from './routes/appointmentRoutes';
 import adminRoutes from './routes/adminRoutes';
+import documentRoutes from './routes/documentRoutes'; // also creates uploads/vault/ at import time
+import { handleStripeWebhook } from './controllers/paymentController';
 
 const app: Application = express();
 
@@ -36,7 +38,17 @@ app.use(mongoSanitize()); // NoSQL injection prevention
 app.use(ipAccessControl); // hard IP block list + allow-list, checked before any rate limiting
 app.use(globalLimiter); // Global rate limit: 100 req / 15 min
 
-//  HTTP request logging (Winston) 
+// Stripe webhook: signature verification needs the exact raw request bytes,
+// so this route is registered with express.raw() and mounted BEFORE the
+// global express.json() parser below — any route after that point would
+// receive an already-parsed (and therefore signature-mismatched) body.
+app.post(
+  '/api/payments/webhook',
+  express.raw({ type: 'application/json' }),
+  handleStripeWebhook
+);
+
+//  HTTP request logging (Winston)
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -62,6 +74,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/documents', documentRoutes);
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok', service: 'HealthVault API' });
@@ -79,7 +92,7 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     res.status(400).json({ message: err.message });
     return;
   }
-  if (err.message === 'Invalid file type: only images are allowed') {
+  if (err.message.startsWith('Invalid file type:')) {
     res.status(400).json({ message: err.message });
     return;
   }

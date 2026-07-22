@@ -1,55 +1,26 @@
-import crypto from 'crypto';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import Appointment, { IAppointment } from '../models/Appointment';
 import User from '../models/User';
 import logger from '../config/logger';
+import { encryptNotes, decryptNotes } from '../utils/encryption';
+import { getStripe, DEPOSIT_AMOUNT, DEPOSIT_CURRENCY } from '../utils/stripe';
 
-//  Notes encryption (AES-256-GCM) 
-
-const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
-
-const getEncryptionKey = (): Buffer => {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET is not defined; cannot derive encryption key');
-  }
-  return crypto.scryptSync(secret, 'healthvault-notes-salt', 32);
-};
-
-export const encryptNotes = (plainText: string): string => {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, getEncryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
-};
-
-export const decryptNotes = (payload: string): string => {
-  try {
-    const parts = payload.split(':');
-    if (parts.length !== 3) return '';
-    const [ivHex, tagHex, dataHex] = parts;
-    const decipher = crypto.createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      getEncryptionKey(),
-      Buffer.from(ivHex, 'hex')
-    );
-    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(dataHex, 'hex')),
-      decipher.final(),
-    ]);
-    return decrypted.toString('utf8');
-  } catch {
-    logger.error('Failed to decrypt appointment notes (tampered or wrong key)');
-    return '';
-  }
-};
+// Notes booked while the frontend still encrypted client-side (now removed)
+// decrypt down to this "enc:v1:<iv>:<ciphertext>" string, which the client
+// no longer knows how to read. Show a friendly placeholder instead of raw ciphertext.
+const LEGACY_CLIENT_ENCRYPTION_PREFIX = 'enc:v1:';
 
 const toSafeAppointment = (appointment: IAppointment): Record<string, unknown> => {
   const obj = appointment.toObject() as unknown as Record<string, unknown>;
-  obj.notes = typeof obj.notes === 'string' && obj.notes.length > 0 ? decryptNotes(obj.notes) : null;
+  if (typeof obj.notes === 'string' && obj.notes.length > 0) {
+    const decrypted = decryptNotes(obj.notes);
+    obj.notes = decrypted.startsWith(LEGACY_CLIENT_ENCRYPTION_PREFIX)
+      ? '[This note was saved with a retired encryption method and can no longer be displayed]'
+      : decrypted;
+  } else {
+    obj.notes = null;
+  }
   return obj;
 };
 
@@ -110,6 +81,11 @@ export const bookAppointment = async (req: Request, res: Response): Promise<void
           date: new Date(date),
           time,
           notes: notes ? encryptNotes(notes) : null,
+          // Snapshot the deposit at booking time so a later change to the
+          // configured rate doesn't retroactively change what an existing
+          // unpaid appointment owes.
+          depositAmount: DEPOSIT_AMOUNT,
+          currency: DEPOSIT_CURRENCY,
         },
       ],
       { session }
@@ -214,12 +190,40 @@ export const cancelAppointment = async (req: Request, res: Response): Promise<vo
     }
 
     appointment.status = 'cancelled';
+
+    // Roll back the transaction: a paid deposit is refunded automatically on
+    // cancellation. Refund failures don't block the cancellation itself —
+    // the appointment slot must still free up — but are recorded on the
+    // record (paymentStatus: 'refund_failed') for admin follow-up rather
+    // than silently swallowed.
+    let refundWarning: string | null = null;
+    if (appointment.paymentStatus === 'paid' && appointment.stripePaymentIntentId) {
+      const stripe = getStripe();
+      if (!stripe) {
+        appointment.paymentStatus = 'refund_failed';
+        refundWarning = 'Payments are not configured on this server; refund was not processed';
+        logger.error(`PAYMENT: cannot refund appointment ${id} — Stripe is not configured`);
+      } else {
+        try {
+          await stripe.refunds.create({ payment_intent: appointment.stripePaymentIntentId });
+          appointment.paymentStatus = 'refunded';
+          logger.info(`PAYMENT: refunded deposit for cancelled appointment ${id}`);
+        } catch (refundError) {
+          const refundMessage = refundError instanceof Error ? refundError.message : 'Unknown error';
+          appointment.paymentStatus = 'refund_failed';
+          refundWarning = 'Cancellation succeeded but the automatic refund failed — support has been notified';
+          logger.error(`PAYMENT: refund failed for appointment ${id}: ${refundMessage}`);
+        }
+      }
+    }
+
     await appointment.save();
 
     logger.info(`APPOINTMENT: ${id} cancelled by user ${req.user.id} (role: ${req.user.role})`);
 
     res.status(200).json({
       message: 'Appointment cancelled',
+      ...(refundWarning ? { warning: refundWarning } : {}),
       appointment: toSafeAppointment(appointment),
     });
   } catch (error) {

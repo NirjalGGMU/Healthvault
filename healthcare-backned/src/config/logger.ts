@@ -26,4 +26,13 @@ const logger = winston.createLogger({
   ],
 });
 
+/** Renders an email as e.g. "ni***@gmail.com" for log lines — enough to correlate entries during incident response, not enough to identify the patient. */
+export const maskEmail = (email: string): string => {
+  const atIndex = email.indexOf('@');
+  if (atIndex <= 0) return '***';
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+  return `${local.slice(0, 2)}***@${domain}`;
+};
+
 export default logger;

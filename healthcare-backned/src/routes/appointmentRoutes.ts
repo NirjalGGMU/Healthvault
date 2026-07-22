@@ -5,6 +5,7 @@ import {
   cancelAppointment,
   getAllAppointments,
 } from '../controllers/appointmentController';
+import { createCheckoutSession } from '../controllers/paymentController';
 import { protect } from '../middleware/authMiddleware';
 import { authorizeRoles } from '../middleware/roleMiddleware';
 import { appointmentValidation, handleValidationErrors } from '../middleware/validateInput';
@@ -22,5 +23,6 @@ router.post(
 router.get('/my', protect, getMyAppointments);
 router.put('/:id/cancel', protect, cancelAppointment);
 router.get('/all', protect, authorizeRoles('admin', 'doctor'), getAllAppointments);
+router.post('/:id/checkout', protect, authorizeRoles('patient'), createCheckoutSession);
 
 export default router;
