@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { LoginResponse, MfaSetupResponse } from '../types';
-import { setToken } from '../utils/auth';
 
 /**
  * Authenticated MFA enrolment:
@@ -53,8 +52,7 @@ const MFASetup = () => {
     }
     setVerifying(true);
     try {
-      const { data } = await api.post<LoginResponse>('/auth/verify-mfa', { token: otp });
-      if (data.token) setToken(data.token); // backend rotates the JWT
+      await api.post<LoginResponse>('/auth/verify-mfa', { token: otp }); // backend rotates the session cookie
       updateUser({ mfaEnabled: true });
       setSecret(null);
       setOtp('');

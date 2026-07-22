@@ -5,7 +5,7 @@ const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 const MAX_EVENTS = 20;
 
 interface SecurityEvent {
-  type: 'login_success' | 'login_failed' | 'account_locked' | 'mfa_failed' | 'ip_blocked';
+  type: 'login_success' | 'login_failed' | 'account_locked' | 'mfa_failed' | 'ip_blocked' | 'password_reset';
   message: string;
   ip?: string;
   email?: string;
@@ -18,6 +18,7 @@ const EVENT_STYLE: Record<SecurityEvent['type'], string> = {
   account_locked: 'badge-red',
   mfa_failed: 'badge-red',
   ip_blocked: 'badge-red',
+  password_reset: 'badge-green',
 };
 
 /** Live feed of security events pushed from the backend via Server-Sent Events */

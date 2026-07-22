@@ -1,7 +1,15 @@
-/** Escapes a value for a single CSV field per RFC 4180 */
+/** Escapes a value for a single CSV field per RFC 4180 and prevents CSV Formula Injection */
 const csvField = (value: unknown): string => {
-  const str = value === null || value === undefined ? '' : String(value);
-  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  let str = value === null || value === undefined ? '' : String(value);
+
+  // Prevent Excel/Spreadsheet formula injection
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+
+  return /[",\n]/.test(str)
+    ? `"${str.replace(/"/g, '""')}"`
+    : str;
 };
 
 const download = (filename: string, content: string, mimeType: string) => {

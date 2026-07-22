@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api, { getErrorMessage } from '../api/axios';
@@ -7,15 +7,9 @@ import { useLanguage } from '../context/LanguageContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { UserRecord } from '../types';
 import { exportToJSON } from '../utils/export';
+import { computeStrength, meetsPolicy } from '../utils/passwordPolicy';
 
 const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-
-const meetsPolicy = (password: string): boolean =>
-  password.length >= 8 &&
-  /[a-z]/.test(password) &&
-  /[A-Z]/.test(password) &&
-  /\d/.test(password) &&
-  /[^A-Za-z0-9]/.test(password);
 
 const Profile = () => {
   const { user, updateUser } = useAuth();
@@ -34,6 +28,8 @@ const Profile = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  const strength = useMemo(() => computeStrength(newPassword), [newPassword]);
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -268,6 +264,25 @@ const Profile = () => {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
               />
+
+              {/* Strength indicator */}
+              {newPassword.length > 0 && (
+                <div className="mt-2">
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((i) => (
+                      <div
+                        key={i}
+                        className={`h-1.5 flex-1 rounded-full ${
+                          i <= strength.score ? strength.color : 'bg-gray-200 dark:bg-gray-700'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {t('register.strength')} <span className="font-semibold">{t(strength.labelKey)}</span>
+                  </p>
+                </div>
+              )}
             </div>
             <div>
               <label htmlFor="confirm" className="label">{t('profile.confirmNewPassword')}</label>

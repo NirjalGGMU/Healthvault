@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { LoginResponse } from '../types';
-import { TEMP_TOKEN_KEY } from '../utils/auth';
 
 const MagicLinkVerify = () => {
   const [searchParams] = useSearchParams();
@@ -30,16 +29,15 @@ const MagicLinkVerify = () => {
       try {
         const { data } = await api.post<LoginResponse>('/auth/magic-link/verify', { token });
 
-        if (data.mfaRequired && data.tempToken) {
-          sessionStorage.setItem(TEMP_TOKEN_KEY, data.tempToken);
+        if (data.mfaRequired) {
           toast('Enter the 6-digit code from your authenticator app');
           navigate('/mfa-verify');
           return;
         }
 
-        if (data.token && data.user) {
+        if (data.user) {
           toast.success(`Welcome back, ${data.user.name}!`);
-          login(data.token, data.user);
+          login(data.user);
           return;
         }
 

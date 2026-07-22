@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { clearAuth, getToken, isTokenExpired } from '../utils/auth';
+import { clearAuth } from '../utils/auth';
 import { ApiErrorBody } from '../types';
 
 const baseURL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`;
@@ -7,18 +7,9 @@ const baseURL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`
 const api = axios.create({
   baseURL,
   timeout: 15000,
-});
-
-// Attach JWT automatically (unless caller set its own Authorization header,
-// e.g. the MFA temp token during login).
-api.interceptors.request.use((config) => {
-  if (!config.headers.Authorization) {
-    const token = getToken();
-    if (token && !isTokenExpired(token)) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
+  // Auth is entirely via the backend's httpOnly session cookie — never held
+  // or read by JS. withCredentials makes the browser send/accept it cross-origin.
+  withCredentials: true,
 });
 
 // Auto logout on 401 from any protected endpoint (also covers a stolen/replayed

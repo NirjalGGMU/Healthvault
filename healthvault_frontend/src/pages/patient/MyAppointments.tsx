@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api, { getErrorMessage } from '../../api/axios';
 import { useLanguage } from '../../context/LanguageContext';
@@ -7,7 +7,6 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import Avatar from '../../components/Avatar';
 import { Appointment, refAvatar, refName } from '../../types';
 import { formatDate } from '../../utils/auth';
-import { decryptNotes } from '../../utils/encryption';
 import { exportToCSV, exportToJSON } from '../../utils/export';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -16,23 +15,71 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: 'badge-red',
 };
 
+const PAYMENT_BADGE: Record<string, string> = {
+  unpaid: 'badge-yellow',
+  paid: 'badge-green',
+  refunded: 'badge-gray',
+  refund_failed: 'badge-red',
+};
+
+/** Falls back to '—' for appointments booked before deposits existed / any malformed value, instead of rendering "$NaN". */
+const formatDeposit = (amountMinorUnits: number | undefined, currency: string | undefined): string => {
+  if (typeof amountMinorUnits !== 'number' || Number.isNaN(amountMinorUnits) || !currency) return '—';
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.toUpperCase() }).format(
+    amountMinorUnits / 100
+  );
+};
+
 const MyAppointments = () => {
   const { t } = useLanguage();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const { data } = await api.get<{ appointments: Appointment[] }>('/appointments/my');
-      const decrypted = await Promise.all(
-        data.appointments.map(async (a) => ({ ...a, notes: await decryptNotes(a.notes) }))
-      );
-      setAppointments(decrypted);
+      setAppointments(data.appointments);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Stripe Checkout redirects back here with ?payment=success|cancelled.
+  // The webhook (not this redirect) is the source of truth for paymentStatus,
+  // so this just gives the user feedback and re-fetches the current state.
+  useEffect(() => {
+    const payment = searchParams.get('payment');
+    if (!payment) return;
+
+    if (payment === 'success') {
+      toast.success(t('appointments.paymentSuccess'));
+    } else if (payment === 'cancelled') {
+      toast.error(t('appointments.paymentCancelled'));
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('payment');
+      next.delete('appointment');
+      return next;
+    }, { replace: true });
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const pay = async (id: string) => {
+    setPayingId(id);
+    try {
+      const { data } = await api.post<{ url: string }>(`/appointments/${id}/checkout`);
+      window.location.href = data.url;
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      setPayingId(null);
     }
   };
 
@@ -42,6 +89,8 @@ const MyAppointments = () => {
       date: formatDate(a.date),
       time: a.time,
       status: a.status,
+      deposit: formatDeposit(a.depositAmount, a.currency),
+      paymentStatus: a.paymentStatus,
       notes: a.notes ?? '',
     }));
 
@@ -113,6 +162,7 @@ const MyAppointments = () => {
                 <th className="table-th">{t('appointments.date')}</th>
                 <th className="table-th">{t('appointments.time')}</th>
                 <th className="table-th">{t('common.status')}</th>
+                <th className="table-th">{t('appointments.deposit')}</th>
                 <th className="table-th">{t('appointments.notes')}</th>
                 <th className="table-th text-right">{t('common.actions')}</th>
               </tr>
@@ -131,16 +181,38 @@ const MyAppointments = () => {
                   <td className="table-td">
                     <span className={STATUS_BADGE[a.status] ?? 'badge-gray'}>{t(`status.${a.status}`)}</span>
                   </td>
+                  <td className="table-td">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {formatDeposit(a.depositAmount, a.currency)}
+                      </span>
+                      <span className={PAYMENT_BADGE[a.paymentStatus] ?? 'badge-gray'}>
+                        {t(`payment.${a.paymentStatus}`)}
+                      </span>
+                    </div>
+                  </td>
                   <td className="table-td max-w-[220px] truncate" title={a.notes ?? ''}>
                     {a.notes || <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </td>
                   <td className="table-td text-right">
+                    <div className="flex justify-end gap-2">
+                      {a.status !== 'cancelled' && a.paymentStatus === 'unpaid' && (
+                        <button
+                          type="button"
+                          onClick={() => pay(a._id)}
+                          disabled={payingId === a._id}
+                          className="btn-primary !px-3 !py-1.5 !text-xs"
+                        >
+                          {payingId === a._id ? t('appointments.paying') : t('appointments.payDeposit')}
+                        </button>
+                      )}
+                    </div>
                     {a.status !== 'cancelled' ? (
                       <button
                         type="button"
                         onClick={() => cancel(a._id)}
                         disabled={cancellingId === a._id}
-                        className="btn-danger !px-3 !py-1.5 !text-xs"
+                        className="btn-danger mt-2 !px-3 !py-1.5 !text-xs"
                       >
                         {cancellingId === a._id ? t('appointments.cancelling') : t('appointments.cancel')}
                       </button>

@@ -12,12 +12,15 @@ import MFASetup from './pages/MFASetup';
 import MFAVerify from './pages/MFAVerify';
 import MagicLink from './pages/MagicLink';
 import MagicLinkVerify from './pages/MagicLinkVerify';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
 
 import PatientDashboard from './pages/patient/PatientDashboard';
 import BookAppointment from './pages/patient/BookAppointment';
 import MyAppointments from './pages/patient/MyAppointments';
+import Documents from './pages/patient/Documents';
 
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
 import DoctorAppointments from './pages/doctor/DoctorAppointments';
@@ -59,6 +62,8 @@ const App = () => (
       <Route path="/mfa-verify" element={<Public><MFAVerify /></Public>} />
       <Route path="/magic-link" element={<Public><MagicLink /></Public>} />
       <Route path="/magic-link/verify" element={<Public><MagicLinkVerify /></Public>} />
+      <Route path="/forgot-password" element={<Public><ForgotPassword /></Public>} />
+      <Route path="/reset-password/:token" element={<Public><ResetPassword /></Public>} />
 
       {/* Authenticated */}
       <Route element={<ProtectedRoute />}>
@@ -71,6 +76,7 @@ const App = () => (
             <Route path="/patient" element={<PatientDashboard />} />
             <Route path="/patient/book" element={<BookAppointment />} />
             <Route path="/patient/appointments" element={<MyAppointments />} />
+            <Route path="/patient/documents" element={<Documents />} />
           </Route>
 
           {/* Doctor only */}

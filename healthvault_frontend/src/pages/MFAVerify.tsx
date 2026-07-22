@@ -5,13 +5,12 @@ import api, { getErrorMessage } from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { LoginResponse } from '../types';
-import { TEMP_TOKEN_KEY } from '../utils/auth';
 
 const DIGITS = 6;
 
 /**
  * Second step of login for MFA-enabled accounts.
- * Uses the short-lived temp token issued by /auth/login.
+ * Authenticated by the short-lived mfaPending httpOnly cookie set by /auth/login.
  */
 const MFAVerify = () => {
   const navigate = useNavigate();
@@ -21,32 +20,17 @@ const MFAVerify = () => {
   const [submitting, setSubmitting] = useState(false);
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
-  // No temp token -> user landed here directly; send them to login
   useEffect(() => {
-    if (!sessionStorage.getItem(TEMP_TOKEN_KEY)) {
-      navigate('/login', { replace: true });
-    } else {
-      inputsRef.current[0]?.focus();
-    }
-  }, [navigate]);
+    inputsRef.current[0]?.focus();
+  }, []);
 
   const submit = async (code: string) => {
-    const tempToken = sessionStorage.getItem(TEMP_TOKEN_KEY);
-    if (!tempToken) {
-      navigate('/login', { replace: true });
-      return;
-    }
     setSubmitting(true);
     try {
-      const { data } = await api.post<LoginResponse>(
-        '/auth/verify-mfa',
-        { token: code },
-        { headers: { Authorization: `Bearer ${tempToken}` } }
-      );
-      if (data.token && data.user) {
-        sessionStorage.removeItem(TEMP_TOKEN_KEY);
+      const { data } = await api.post<LoginResponse>('/auth/verify-mfa', { token: code });
+      if (data.user) {
         toast.success('MFA verified — welcome back!');
-        login(data.token, data.user);
+        login(data.user);
         return;
       }
       toast.error('Unexpected response from server');
@@ -130,10 +114,7 @@ const MFAVerify = () => {
         <button
           type="button"
           className="mt-2 text-sm font-semibold text-primary-600 hover:underline dark:text-primary-400"
-          onClick={() => {
-            sessionStorage.removeItem(TEMP_TOKEN_KEY);
-            navigate('/login');
-          }}
+          onClick={() => navigate('/login')}
         >
           {t('mfaVerify.backToLogin')}
         </button>

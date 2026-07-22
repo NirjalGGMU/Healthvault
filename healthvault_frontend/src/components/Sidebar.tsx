@@ -17,6 +17,7 @@ export const getNavLinks = (role: UserRole, t: (key: string) => string): NavItem
         { label: t('nav.dashboard'), to: '/patient', end: true },
         { label: t('nav.bookAppointment'), to: '/patient/book' },
         { label: t('nav.myAppointments'), to: '/patient/appointments' },
+        { label: t('nav.documents'), to: '/patient/documents' },
       ];
     case 'doctor':
       return [

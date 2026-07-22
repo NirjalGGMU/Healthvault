@@ -6,7 +6,6 @@ import { useLanguage } from '../../context/LanguageContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import Avatar from '../../components/Avatar';
 import { DoctorOption } from '../../types';
-import { encryptNotes } from '../../utils/encryption';
 
 const TIME_SLOTS = [
   '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
@@ -21,6 +20,7 @@ const BookAppointment = () => {
   const { t } = useLanguage();
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [loadingDoctors, setLoadingDoctors] = useState(true);
+  const [doctorsError, setDoctorsError] = useState<string | null>(null);
 
   const [doctorId, setDoctorId] = useState('');
   const [date, setDate] = useState('');
@@ -28,18 +28,25 @@ const BookAppointment = () => {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const loadDoctors = async () => {
+    setLoadingDoctors(true);
+    setDoctorsError(null);
+    try {
+      const { data } = await api.get<{ doctors: DoctorOption[] }>('/users/doctors');
+      setDoctors(data.doctors);
+    } catch (error) {
+      // Distinct from "zero doctors registered" — a failed request (rate
+      // limit, network, 500) must not silently render as an empty roster.
+      const message = getErrorMessage(error);
+      setDoctorsError(message);
+      toast.error(message);
+    } finally {
+      setLoadingDoctors(false);
+    }
+  };
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data } = await api.get<{ doctors: DoctorOption[] }>('/users/doctors');
-        setDoctors(data.doctors);
-      } catch (error) {
-        toast.error(getErrorMessage(error));
-      } finally {
-        setLoadingDoctors(false);
-      }
-    };
-    void load();
+    void loadDoctors();
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -68,14 +75,29 @@ const BookAppointment = () => {
     setSubmitting(true);
     try {
       const trimmedNotes = notes.trim();
-      await api.post('/appointments/book', {
+      // Sent as plaintext over HTTPS; the backend encrypts notes at rest (AES-256-GCM).
+      const { data } = await api.post<{ appointment: { _id: string } }>('/appointments/book', {
         doctorId,
         date,
         time,
-        notes: trimmedNotes ? await encryptNotes(trimmedNotes) : undefined,
+        notes: trimmedNotes || undefined,
       });
-      toast.success('Appointment booked!');
-      navigate('/patient/appointments');
+
+      // Immediately start Stripe Checkout for the deposit. The appointment
+      // already exists (paymentStatus: 'unpaid') — if checkout fails to start
+      // or the patient abandons it, they can still pay later from
+      // "My Appointments" rather than losing the booking.
+      try {
+        const { data: checkout } = await api.post<{ url: string }>(
+          `/appointments/${data.appointment._id}/checkout`
+        );
+        window.location.href = checkout.url;
+        return;
+      } catch (checkoutError) {
+        toast.error(getErrorMessage(checkoutError));
+        toast.success(t('book.bookedPayLater'));
+        navigate('/patient/appointments');
+      }
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -94,7 +116,14 @@ const BookAppointment = () => {
         {/* Doctor selection */}
         <div>
           <p className="label">{t('book.selectDoctor')}</p>
-          {doctors.length === 0 ? (
+          {doctorsError ? (
+            <div className="rounded-lg bg-red-50 px-4 py-6 text-center text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+              <p>{doctorsError}</p>
+              <button type="button" onClick={() => void loadDoctors()} className="btn-outline mt-3 !px-3 !py-1.5 !text-xs">
+                {t('common.retry')}
+              </button>
+            </div>
+          ) : doctors.length === 0 ? (
             <p className="rounded-lg bg-gray-50 px-4 py-6 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400">
               {t('book.noDoctors')}
             </p>
@@ -174,6 +203,8 @@ const BookAppointment = () => {
           />
           <p className="mt-1 text-right text-xs text-gray-400 dark:text-gray-500">{notes.length}/2000</p>
         </div>
+
+        <p className="text-xs text-gray-500 dark:text-gray-400">{t('book.depositNotice')}</p>
 
         <button type="submit" className="btn-primary w-full" disabled={submitting || doctors.length === 0}>
           {submitting ? t('book.booking') : t('book.confirmBooking')}

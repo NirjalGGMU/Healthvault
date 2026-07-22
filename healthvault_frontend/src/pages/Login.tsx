@@ -6,8 +6,7 @@ import api, { getErrorMessage, isLockedError } from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import TextCaptcha, { TextCaptchaHandle } from '../components/TextCaptcha';
-import { LoginResponse } from '../types';
-import { TEMP_TOKEN_KEY } from '../utils/auth';
+import { LoginPrecheckResponse, LoginResponse } from '../types';
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined;
 
@@ -15,6 +14,11 @@ const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
   const { t } = useLanguage();
+
+  const [step, setStep] = useState<'email' | 'credentials'>('email');
+  const [checkingAccount, setCheckingAccount] = useState(false);
+  // Server-decided, per account (see /auth/login-precheck) — never assumed client-side.
+  const [captchaRequired, setCaptchaRequired] = useState(true);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,47 +32,80 @@ const Login = () => {
   const [textCaptchaToken, setTextCaptchaToken] = useState<string | null>(null);
   const textCaptchaRef = useRef<TextCaptchaHandle>(null);
 
-  const validate = (): boolean => {
-    const next: Record<string, string> = {};
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) next.email = 'Enter a valid email address';
-    if (password.length === 0) next.password = 'Password is required';
-    setErrors(next);
-    return Object.keys(next).length === 0;
+  const isValidEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const handleEmailSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!isValidEmail(email)) {
+      setErrors({ email: 'Enter a valid email address' });
+      return;
+    }
+    setErrors({});
+    setCheckingAccount(true);
+    try {
+      const { data } = await api.post<LoginPrecheckResponse>('/auth/login-precheck', {
+        email: email.trim(),
+      });
+      setCaptchaRequired(data.captchaRequired);
+      setStep('credentials');
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setCheckingAccount(false);
+    }
+  };
+
+  const handleChangeEmail = () => {
+    setStep('email');
+    setPassword('');
+    setLocked(false);
+    setErrors({});
+    setCaptchaToken(null);
+    captchaRef.current?.reset();
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
-    if (RECAPTCHA_SITE_KEY && !captchaToken) {
-      toast.error(t('register.captchaRequired'));
-      return;
+    const next: Record<string, string> = {};
+    if (password.length === 0) next.password = 'Password is required';
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+
+    if (captchaRequired) {
+      if (RECAPTCHA_SITE_KEY && !captchaToken) {
+        toast.error(t('register.captchaRequired'));
+        return;
+      }
+      if (!textCaptchaAnswer.trim()) {
+        toast.error(t('captcha.textRequired'));
+        return;
+      }
     }
-    if (!textCaptchaAnswer.trim()) {
-      toast.error(t('captcha.textRequired'));
-      return;
-    }
+
     setLocked(false);
     setSubmitting(true);
     try {
       const { data } = await api.post<LoginResponse>('/auth/login', {
         email: email.trim(),
         password,
-        'g-recaptcha-response': captchaToken,
-        captchaToken: textCaptchaToken,
-        captchaAnswer: textCaptchaAnswer,
+        ...(captchaRequired && {
+          'g-recaptcha-response': captchaToken,
+          captchaToken: textCaptchaToken,
+          captchaAnswer: textCaptchaAnswer,
+        }),
       });
 
-      // MFA-enabled account: stash the temp token and go verify the OTP
-      if (data.mfaRequired && data.tempToken) {
-        sessionStorage.setItem(TEMP_TOKEN_KEY, data.tempToken);
+      // MFA-enabled account: an mfaPending session cookie is already set —
+      // go verify the OTP.
+      if (data.mfaRequired) {
         toast('Enter the 6-digit code from your authenticator app');
         navigate('/mfa-verify');
         return;
       }
 
-      if (data.token && data.user) {
+      if (data.user) {
         toast.success(`Welcome back, ${data.user.name}!`);
-        login(data.token, data.user); // navigates to the role dashboard
+        login(data.user); // navigates to the role dashboard
         return;
       }
 
@@ -79,9 +116,11 @@ const Login = () => {
       } else {
         toast.error(getErrorMessage(error));
       }
-      captchaRef.current?.reset();
-      setCaptchaToken(null);
-      textCaptchaRef.current?.refresh();
+      if (captchaRequired) {
+        captchaRef.current?.reset();
+        setCaptchaToken(null);
+        textCaptchaRef.current?.refresh();
+      }
     } finally {
       setSubmitting(false);
     }
@@ -100,62 +139,97 @@ const Login = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
-          <div>
-            <label htmlFor="email" className="label">{t('login.email')}</label>
-            <input
-              id="email"
-              type="email"
-              className="input-field"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-            />
-            {errors.email && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.email}</p>}
-          </div>
-
-          <div>
-            <label htmlFor="password" className="label">{t('login.password')}</label>
-            <div className="relative">
+        {step === 'email' ? (
+          <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4" noValidate>
+            <div>
+              <label htmlFor="email" className="label">{t('login.email')}</label>
               <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                className="input-field pr-16"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
+                id="email"
+                type="email"
+                className="input-field"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                autoFocus
               />
+              {errors.email && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.email}</p>}
+            </div>
+
+            <button type="submit" className="btn-primary w-full" disabled={checkingAccount} aria-label={t('login.continue')}>
+              {checkingAccount ? t('login.checkingAccount') : t('login.continue')}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
+            <div>
+              <label htmlFor="email-readonly" className="label">{t('login.email')}</label>
+              <input id="email-readonly" type="email" className="input-field" value={email} disabled />
               <button
                 type="button"
-                onClick={() => setShowPassword((s) => !s)}
-                aria-label={showPassword ? t('login.hide') : t('login.show')}
-                className="absolute inset-y-0 right-3 text-xs font-semibold text-primary-600 dark:text-primary-400"
+                onClick={handleChangeEmail}
+                className="mt-1 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
               >
-                {showPassword ? t('login.hide') : t('login.show')}
+                {t('login.changeEmail')}
               </button>
             </div>
-            {errors.password && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.password}</p>}
-          </div>
 
-          <TextCaptcha
-            ref={textCaptchaRef}
-            value={textCaptchaAnswer}
-            onValueChange={setTextCaptchaAnswer}
-            onTokenChange={setTextCaptchaToken}
-          />
-
-          {RECAPTCHA_SITE_KEY && (
-            <div className="flex justify-center overflow-x-auto">
-              <ReCAPTCHA ref={captchaRef} sitekey={RECAPTCHA_SITE_KEY} onChange={(val) => setCaptchaToken(val)} />
+            <div>
+              <label htmlFor="password" className="label">{t('login.password')}</label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="input-field pr-16"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  aria-label={showPassword ? t('login.hide') : t('login.show')}
+                  className="absolute inset-y-0 right-3 text-xs font-semibold text-primary-600 dark:text-primary-400"
+                >
+                  {showPassword ? t('login.hide') : t('login.show')}
+                </button>
+              </div>
+              <div className="mt-1 flex items-center justify-between">
+                {errors.password ? (
+                  <p className="text-xs text-red-600 dark:text-red-400">{errors.password}</p>
+                ) : (
+                  <span />
+                )}
+                <Link to="/forgot-password" className="text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400">
+                  {t('login.forgotPassword')}
+                </Link>
+              </div>
             </div>
-          )}
 
-          <button type="submit" className="btn-primary w-full" disabled={submitting} aria-label={t('login.signIn')}>
-            {submitting ? t('login.signingIn') : t('login.signIn')}
-          </button>
-        </form>
+            {captchaRequired && (
+              <>
+                <TextCaptcha
+                  ref={textCaptchaRef}
+                  value={textCaptchaAnswer}
+                  onValueChange={setTextCaptchaAnswer}
+                  onTokenChange={setTextCaptchaToken}
+                />
+
+                {RECAPTCHA_SITE_KEY && (
+                  <div className="flex justify-center overflow-x-auto">
+                    <ReCAPTCHA ref={captchaRef} sitekey={RECAPTCHA_SITE_KEY} onChange={(val) => setCaptchaToken(val)} />
+                  </div>
+                )}
+              </>
+            )}
+
+            <button type="submit" className="btn-primary w-full" disabled={submitting} aria-label={t('login.signIn')}>
+              {submitting ? t('login.signingIn') : t('login.signIn')}
+            </button>
+          </form>
+        )}
 
         <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
           {t('login.newToHealthVault')}{' '}

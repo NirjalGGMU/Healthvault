@@ -1,25 +1,9 @@
-import {
-  ReactNode,
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../api/axios';
-import { AuthUser, UserRole } from '../types';
-import {
-  clearAuth,
-  getStoredUser,
-  getToken,
-  getTokenRemainingMs,
-  isTokenExpired,
-  setStoredUser,
-  setToken,
-} from '../utils/auth';
+import { AuthUser, UserRecord, UserRole } from '../types';
+import { clearAuth, getStoredUser, setStoredUser } from '../utils/auth';
 
 export const roleHome = (role: UserRole): string =>
   role === 'admin' ? '/admin' : role === 'doctor' ? '/doctor' : '/patient';
@@ -28,7 +12,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   isAuthenticated: boolean;
-  login: (token: string, user: AuthUser) => void;
+  login: (user: AuthUser) => void;
   logout: () => void;
   updateUser: (fields: Partial<AuthUser>) => void;
 }
@@ -39,18 +23,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const timerRef = useRef<number | null>(null);
-
-  const clearTimer = () => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
 
   const performLogout = useCallback(
     (expired: boolean) => {
-      clearTimer();
       clearAuth();
       setUser(null);
       if (expired) toast.error('Session expired. Please log in again.');
@@ -59,44 +34,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     [navigate]
   );
 
-  // Auto logout exactly when the JWT expires
-  const scheduleAutoLogout = useCallback(
-    (token: string) => {
-      clearTimer();
-      const remaining = getTokenRemainingMs(token);
-      if (remaining <= 0) {
-        performLogout(true);
-        return;
-      }
-      timerRef.current = window.setTimeout(() => performLogout(true), remaining);
-    },
-    [performLogout]
-  );
-
-  // Restore session on first load
+  // Restore session on first load. The session itself lives in the backend's
+  // httpOnly cookie (never readable by JS), so we optimistically render the
+  // cached profile, then confirm it against the server; a 401 means the
+  // cookie is missing/expired.
   useEffect(() => {
-    const token = getToken();
     const stored = getStoredUser();
-    if (token && stored && !isTokenExpired(token)) {
-      setUser(stored);
-      scheduleAutoLogout(token);
-    } else {
-      clearAuth();
-    }
-    setLoading(false);
-    return clearTimer;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (stored) setUser(stored);
+
+    api
+      .get<{ user: UserRecord }>('/users/profile')
+      .then(({ data }) => {
+        // /users/profile returns the raw Mongo doc (_id), not the AuthUser
+        // shape (id) that login/verify-mfa return — normalize it.
+        const profileUser: AuthUser = {
+          id: data.user._id,
+          name: data.user.name,
+          email: data.user.email,
+          role: data.user.role,
+          mfaEnabled: data.user.mfaEnabled,
+          avatarUrl: data.user.avatarUrl,
+          lastLogin: data.user.lastLogin,
+          passwordChangedAt: data.user.passwordChangedAt,
+        };
+        setStoredUser(profileUser);
+        setUser(profileUser);
+      })
+      .catch(() => {
+        clearAuth();
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(
-    (token: string, authUser: AuthUser) => {
-      setToken(token);
+    (authUser: AuthUser) => {
       setStoredUser(authUser);
       setUser(authUser);
-      scheduleAutoLogout(token);
       navigate(roleHome(authUser.role), { replace: true });
     },
-    [navigate, scheduleAutoLogout]
+    [navigate]
   );
 
   const logout = useCallback(() => {

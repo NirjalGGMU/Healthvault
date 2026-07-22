@@ -5,7 +5,6 @@ import { useLanguage } from '../../context/LanguageContext';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { Appointment, AppointmentStatus, refEmail, refName } from '../../types';
 import { formatDate } from '../../utils/auth';
-import { decryptNotes } from '../../utils/encryption';
 import { exportToCSV, exportToJSON } from '../../utils/export';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -27,10 +26,7 @@ const DoctorAppointments = () => {
     const load = async () => {
       try {
         const { data } = await api.get<{ appointments: Appointment[] }>('/appointments/all');
-        const decrypted = await Promise.all(
-          data.appointments.map(async (a) => ({ ...a, notes: await decryptNotes(a.notes) }))
-        );
-        setAppointments(decrypted);
+        setAppointments(data.appointments);
       } catch (error) {
         toast.error(getErrorMessage(error));
       } finally {

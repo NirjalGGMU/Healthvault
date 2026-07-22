@@ -1,16 +1,9 @@
 import { AuthUser } from '../types';
 
-const TOKEN_KEY = 'hv_token';
 const USER_KEY = 'hv_user';
-export const TEMP_TOKEN_KEY = 'hv_temp_token';
 
-// ---------- Token storage ----------
-
-export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
-
-export const setToken = (token: string): void => {
-  localStorage.setItem(TOKEN_KEY, token);
-};
+// ---------- Cached user (display only — the session itself lives in the
+// backend's httpOnly cookie, never in JS-readable storage) ----------
 
 export const getStoredUser = (): AuthUser | null => {
   const raw = localStorage.getItem(USER_KEY);
@@ -27,41 +20,7 @@ export const setStoredUser = (user: AuthUser): void => {
 };
 
 export const clearAuth = (): void => {
-  localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
-  sessionStorage.removeItem(TEMP_TOKEN_KEY);
-};
-
-// ---------- JWT expiry helpers ----------
-
-interface TokenPayload {
-  exp?: number;
-  id?: string;
-  role?: string;
-  mfaPending?: boolean;
-}
-
-export const decodeToken = (token: string): TokenPayload | null => {
-  try {
-    const part = token.split('.')[1];
-    if (!part) return null;
-    const base64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(base64)) as TokenPayload;
-  } catch {
-    return null;
-  }
-};
-
-export const isTokenExpired = (token: string): boolean => {
-  const payload = decodeToken(token);
-  if (!payload?.exp) return true;
-  return payload.exp * 1000 <= Date.now();
-};
-
-export const getTokenRemainingMs = (token: string): number => {
-  const payload = decodeToken(token);
-  if (!payload?.exp) return 0;
-  return Math.max(0, payload.exp * 1000 - Date.now());
 };
 
 // ---------- Display helpers ----------
@@ -72,6 +31,15 @@ export const formatDate = (iso: string): string =>
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+  });
+
+export const formatDateTime = (iso: string): string =>
+  new Date(iso).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
 
 export const isToday = (iso: string): boolean => {

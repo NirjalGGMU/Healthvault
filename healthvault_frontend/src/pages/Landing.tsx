@@ -110,7 +110,7 @@ const Landing = () => {
         </div>
       </section>
 
-      <footer className="border-t border-gray-200 bg-white py-8 text-center text-sm text-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-500">
+      <footer className="border-t border-gray-200 bg-white py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
         {t('landing.footer')}
       </footer>
     </div>

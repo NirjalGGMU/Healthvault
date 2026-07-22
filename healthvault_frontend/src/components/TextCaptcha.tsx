@@ -17,15 +17,19 @@ const TextCaptcha = forwardRef<TextCaptchaHandle, TextCaptchaProps>(
     const { t } = useLanguage();
     const [svg, setSvg] = useState('');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
 
     const fetchCaptcha = async () => {
       setLoading(true);
+      setError(false);
       onValueChange('');
       try {
         const { data } = await api.get<{ svg: string; captchaToken: string }>('/auth/captcha');
         setSvg(data.svg);
         onTokenChange(data.captchaToken);
       } catch {
+        setSvg('');
+        setError(true);
         onTokenChange(null);
       } finally {
         setLoading(false);
@@ -45,11 +49,17 @@ const TextCaptcha = forwardRef<TextCaptchaHandle, TextCaptchaProps>(
           {t('captcha.label')}
         </label>
         <div className="flex items-center gap-2">
-          <div
-            className="flex h-[60px] w-[160px] items-center justify-center overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600"
-            aria-hidden="true"
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+          {error ? (
+            <div className="flex h-[60px] w-[160px] items-center justify-center rounded-lg border border-red-400 bg-white px-2 text-center text-xs text-red-600">
+              {t('captcha.loadError')}
+            </div>
+          ) : (
+            <div
+              className="flex h-[60px] w-[160px] items-center justify-center overflow-hidden rounded-lg border border-gray-300 bg-white dark:border-gray-600"
+              aria-hidden="true"
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          )}
           <button
             type="button"
             onClick={() => void fetchCaptcha()}

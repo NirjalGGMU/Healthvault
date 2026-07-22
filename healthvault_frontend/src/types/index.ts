@@ -10,6 +10,8 @@ export interface AuthUser {
   role: UserRole;
   mfaEnabled?: boolean;
   avatarUrl?: string | null;
+  lastLogin?: string | null;
+  passwordChangedAt?: string | null;
 }
 
 /** Full user document returned by /users/profile and /users/all */
@@ -24,6 +26,7 @@ export interface UserRecord {
   lastLogin?: string | null;
   createdAt?: string;
   avatarUrl?: string | null;
+  passwordChangedAt?: string;
 }
 
 /** Minimal doctor entry returned by /users/doctors */
@@ -42,6 +45,8 @@ export interface PopulatedUserRef {
   avatarUrl?: string | null;
 }
 
+export type PaymentStatus = 'unpaid' | 'paid' | 'refunded' | 'refund_failed';
+
 export interface Appointment {
   _id: string;
   patientId: PopulatedUserRef | string;
@@ -50,15 +55,20 @@ export interface Appointment {
   time: string;
   status: AppointmentStatus;
   notes?: string | null;
+  depositAmount: number;
+  currency: string;
+  paymentStatus: PaymentStatus;
   createdAt?: string;
 }
 
 export interface LoginResponse {
   message: string;
-  token?: string;
   user?: AuthUser;
   mfaRequired?: boolean;
-  tempToken?: string;
+}
+
+export interface LoginPrecheckResponse {
+  captchaRequired: boolean;
 }
 
 export interface MagicLinkResponse {
@@ -67,10 +77,24 @@ export interface MagicLinkResponse {
   devMagicLink?: string;
 }
 
+export interface PasswordResetRequestResponse {
+  message: string;
+  /** Dev-mode only stand-in for actually emailing the link (no mail provider configured) */
+  devResetLink?: string;
+}
+
 export interface MfaSetupResponse {
   message: string;
   base32: string;
   otpauthUrl: string;
+}
+
+export interface VaultDocument {
+  _id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
 }
 
 export interface ApiErrorBody {
